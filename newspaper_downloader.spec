@@ -18,6 +18,8 @@ a = Analysis(
         'PyQt6.QtWidgets',
         'requests',
         'PyPDF2',
+        'PIL',
+        'PIL.Image',
     ],
     hookspath=[],
     hooksconfig={},

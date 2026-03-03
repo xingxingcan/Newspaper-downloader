@@ -15,3 +15,6 @@ Pillow>=9.0.0
 
 # 日期处理 (标准库 datetime 已足够，此处作为可选增强)
 # python-dateutil>=2.8.0
+
+# 打包为 EXE（可选，仅构建时使用）
+# pyinstaller>=6.0.0

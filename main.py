@@ -36,7 +36,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setApplicationName("报纸下载器")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("2.0.0")
     app.setOrganizationName("NewspaperDownloader")
 
     # 设置默认字体
