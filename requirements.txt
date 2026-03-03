@@ -1,0 +1,14 @@
+# 报纸下载器 - Python 依赖
+# Python 3.9+ 推荐
+
+# 图形界面
+PyQt6>=6.5.0
+
+# 网络请求
+requests>=2.28.0
+
+# PDF 合并 (人民日报等分页下载)
+PyPDF2>=3.0.0
+
+# 日期处理 (标准库 datetime 已足够，此处作为可选增强)
+# python-dateutil>=2.8.0
