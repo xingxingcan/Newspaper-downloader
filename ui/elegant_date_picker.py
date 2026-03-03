@@ -32,7 +32,7 @@ class ElegantDatePicker(QFrame):
         self._update_display()
         self.setStyleSheet(self._get_style())
         self.setMinimumWidth(160)
-        self.setMinimumHeight(42)
+        self.setMinimumHeight(56)
 
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -46,9 +46,10 @@ class ElegantDatePicker(QFrame):
         self._date_label.setFont(font)
         layout.addWidget(self._date_label, 1)
 
-        self._btn = QPushButton("📅")
+        self._btn = QPushButton("📅 日历")
         self._btn.setObjectName("calendarBtn")
-        self._btn.setFixedSize(36, 36)
+        self._btn.setToolTip("点击选择日期")
+        self._btn.setFixedSize(100, 48)
         self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn.clicked.connect(self._on_btn_clicked)
         layout.addWidget(self._btn)
@@ -72,7 +73,8 @@ class ElegantDatePicker(QFrame):
                 color: #0d9488;
                 border: 1px solid #99f6e4;
                 border-radius: 8px;
-                font-size: 16px;
+                font-size: 13px;
+                font-weight: 500;
             }
             ElegantDatePicker#elegantDatePicker QPushButton#calendarBtn:hover {
                 background-color: #ccfbf1;

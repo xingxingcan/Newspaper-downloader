@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from ui.main_window import MainWindow
+from ui.main_window import MainWindow, get_stylesheet
 
 
 def main() -> None:
@@ -44,6 +44,9 @@ def main() -> None:
     font.setFamily("Microsoft YaHei")
     font.setPointSize(10)
     app.setFont(font)
+
+    # 应用全局样式（含 QMessageBox 等对话框）
+    app.setStyleSheet(get_stylesheet())
 
     window = MainWindow()
     window.show()

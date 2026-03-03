@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QGroupBox,
     QCheckBox,
     QLabel,
@@ -22,11 +23,15 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QFrame,
+    QRadioButton,
+    QButtonGroup,
+    QScrollArea,
 )
 from PyQt6.QtCore import Qt, QDate, QThread, QUrl
 from PyQt6.QtGui import QDesktopServices
 
 from config import ConfigManager, NEWSPAPER_SOURCES
+from config.newspaper_sources import ONLINE_NEWSPAPER_URL, NEWSPAPER_CATEGORIES
 from downloader.worker import DownloadWorker
 from downloader.base import DownloadResult
 from .elegant_date_picker import ElegantDatePicker
@@ -237,6 +242,24 @@ def get_stylesheet() -> str:
         QCheckBox::indicator:hover {{
             border-color: {THEME["accent"]};
         }}
+        QRadioButton {{
+            spacing: 8px;
+            color: {THEME["text_primary"]};
+        }}
+        QRadioButton::indicator {{
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            border: 1px solid {THEME["border"]};
+            background-color: {THEME["bg_card"]};
+        }}
+        QRadioButton::indicator:checked {{
+            background-color: {THEME["accent"]};
+            border-color: {THEME["accent"]};
+        }}
+        QRadioButton::indicator:hover {{
+            border-color: {THEME["accent"]};
+        }}
         QScrollBar:vertical {{
             background: #f5f5f5;
             width: 8px;
@@ -253,6 +276,14 @@ def get_stylesheet() -> str:
         }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0;
+        }}
+        QMessageBox {{
+            background-color: {THEME["bg_card"]};
+            color: {THEME["text_primary"]};
+        }}
+        QMessageBox QLabel {{
+            color: {THEME["text_primary"]};
+            background-color: transparent;
         }}
     """
 
@@ -296,7 +327,12 @@ class MainWindow(QMainWindow):
         header_layout = QHBoxLayout()
         header_layout.addWidget(header)
         header_layout.addStretch()
-        ver_label = QLabel("v1.0")
+        about_btn = QPushButton("关于")
+        about_btn.setObjectName("secondary")
+        about_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        about_btn.clicked.connect(self._show_about)
+        header_layout.addWidget(about_btn)
+        ver_label = QLabel("v2.0.0")
         ver_label.setStyleSheet(f"color: {THEME["text_muted"]}; font-size: 12px;")
         header_layout.addWidget(ver_label)
         main_layout.addLayout(header_layout)
@@ -319,29 +355,61 @@ class MainWindow(QMainWindow):
         paper_group = QGroupBox("报纸源")
         paper_layout = QVBoxLayout()
         btn_row = QHBoxLayout()
-        for txt, obj, slot in [("全选", "selectAll", self._select_all_papers),
-                                ("全不选", "deselectAll", self._deselect_all_papers)]:
-            btn = QPushButton(txt)
-            btn.setObjectName("secondary")
-            btn.clicked.connect(slot)
-            btn_row.addWidget(btn)
+        clear_btn = QPushButton("清除选择")
+        clear_btn.setObjectName("secondary")
+        clear_btn.clicked.connect(self._clear_paper_selection)
+        btn_row.addWidget(clear_btn)
         btn_row.addStretch()
         paper_layout.addLayout(btn_row)
-        self.paper_checkboxes = []
-        for src in NEWSPAPER_SOURCES:
-            if not src.get("enabled", True):
-                continue
-            cb = QCheckBox(src["name"])
-            cb.setProperty("newspaper_id", src["id"])
-            cb.setToolTip(src.get("description", ""))
-            self.paper_checkboxes.append(cb)
-            paper_layout.addWidget(cb)
+
+        # 分类单选
+        category_row = QHBoxLayout()
+        self.category_group = QButtonGroup(self)
+        self.category_radios = []
+        for display_name, cat_id in NEWSPAPER_CATEGORIES:
+            rb = QRadioButton(display_name)
+            rb.setProperty("category_id", cat_id)
+            rb.toggled.connect(self._on_category_changed)
+            self.category_group.addButton(rb)
+            self.category_radios.append(rb)
+            category_row.addWidget(rb)
+        category_row.addStretch()
+        paper_layout.addLayout(category_row)
+
+        self.paper_radios = []
+        self.paper_button_group = QButtonGroup(self)
+        self.paper_container = QWidget()
+        self.paper_container_layout = QGridLayout(self.paper_container)
+        self.paper_container_layout.setContentsMargins(0, 8, 0, 0)
+        self.paper_container_layout.setSpacing(4)
+        scroll = QScrollArea()
+        scroll.setWidget(self.paper_container)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setMinimumHeight(140)
+        scroll.setMaximumHeight(340)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        paper_layout.addWidget(scroll)
+
+        # 在线报纸阅读入口
+        online_link_btn = QPushButton("求是网·党报党刊（在线报纸阅读）")
+        online_link_btn.setObjectName("secondary")
+        online_link_btn.setToolTip("在浏览器中打开求是网党报党刊汇总页面")
+        online_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        online_link_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(ONLINE_NEWSPAPER_URL)))
+        paper_layout.addWidget(online_link_btn)
         paper_group.setLayout(paper_layout)
         left_col.addWidget(paper_group)
+
+        self.category_radios[0].setChecked(True)
+        self._refresh_paper_list()
 
         # 日期选择卡片
         date_group = QGroupBox("日期")
         date_layout = QVBoxLayout()
+        date_layout.setSpacing(4)
         self.date_edit = ElegantDatePicker()
         self.date_edit.setDate(QDate.currentDate())
         self.date_edit.setDateRange(
@@ -349,6 +417,10 @@ class MainWindow(QMainWindow):
             QDate.currentDate(),
         )
         date_layout.addWidget(self.date_edit)
+        date_hint = QLabel("默认下载当天，可选择其他日期")
+        date_hint.setStyleSheet(f"color: {THEME['text_muted']}; font-size: 12px;")
+        date_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        date_layout.addWidget(date_hint)
         date_group.setLayout(date_layout)
         left_col.addWidget(date_group)
 
@@ -368,12 +440,14 @@ class MainWindow(QMainWindow):
         save_row.addWidget(self.save_dir_edit)
         browse_btn = QPushButton("浏览")
         browse_btn.setObjectName("secondary")
+        browse_btn.setToolTip("选择 PDF 保存目录")
         browse_btn.clicked.connect(self._on_browse)
-        open_btn = QPushButton("打开")
-        open_btn.setObjectName("secondary")
-        open_btn.clicked.connect(self._on_open_dir)
+        open_folder_btn = QPushButton("打开文件夹")
+        open_folder_btn.setObjectName("secondary")
+        open_folder_btn.setToolTip("在文件管理器中打开当前 PDF 下载目录")
+        open_folder_btn.clicked.connect(self._on_open_dir)
         save_row.addWidget(browse_btn)
-        save_row.addWidget(open_btn)
+        save_row.addWidget(open_folder_btn)
         save_layout.addLayout(save_row)
         save_group.setLayout(save_layout)
         right_col.addWidget(save_group)
@@ -390,8 +464,15 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_btn.clicked.connect(self._on_cancel)
         self.cancel_btn.setEnabled(False)
+        open_file_btn = QPushButton("打开")
+        open_file_btn.setObjectName("secondary")
+        open_file_btn.setMinimumHeight(44)
+        open_file_btn.setToolTip("打开当前选择的报纸 PDF 文件")
+        open_file_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_file_btn.clicked.connect(self._on_open_file)
         ctrl_layout.addWidget(self.download_btn)
         ctrl_layout.addWidget(self.cancel_btn)
+        ctrl_layout.addWidget(open_file_btn)
         ctrl_layout.addStretch()
         right_col.addLayout(ctrl_layout)
 
@@ -421,14 +502,51 @@ class MainWindow(QMainWindow):
     def _load_config(self) -> None:
         self.save_dir_edit.setText(self.config.save_dir)
         self.date_edit.setDate(QDate.currentDate())
-        for nid in self.config.last_newspapers:
-            for cb in self.paper_checkboxes:
-                if cb.property("newspaper_id") == nid:
-                    cb.setChecked(True)
-                    break
+        # 报纸源默认不勾选，需用户手动选择
 
     def _connect_signals(self) -> None:
         pass
+
+    def _get_selected_category(self) -> str:
+        for rb in self.category_radios:
+            if rb.isChecked():
+                return rb.property("category_id")
+        return "zhonghe"
+
+    def _on_category_changed(self) -> None:
+        rb = self.sender()
+        if isinstance(rb, QRadioButton) and rb.isChecked():
+            self._refresh_paper_list()
+
+    def _refresh_paper_list(self) -> None:
+        """根据分类刷新报纸单选列表，多列网格布局"""
+        for rb in self.paper_radios:
+            self.paper_button_group.removeButton(rb)
+        while self.paper_container_layout.count():
+            child = self.paper_container_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        self.paper_radios.clear()
+
+        cat = self._get_selected_category()
+        cols = 2
+        sources = [
+            src for src in NEWSPAPER_SOURCES
+            if src.get("category", "zhonghe") == cat and src.get("enabled", True)
+        ]
+        for i, src in enumerate(sources):
+            rb = QRadioButton(src["name"])
+            rb.setProperty("newspaper_id", src["id"])
+            rb.setToolTip(src.get("description", ""))
+            self.paper_button_group.addButton(rb)
+            self.paper_radios.append(rb)
+            row, col = i // cols, i % cols
+            self.paper_container_layout.addWidget(rb, row, col)
+
+        if not self.paper_radios:
+            hint = QLabel("该分类暂无可用报纸")
+            hint.setStyleSheet(f"color: {THEME['text_muted']}; font-size: 12px;")
+            self.paper_container_layout.addWidget(hint, 0, 0)
 
     def _on_browse(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "选择保存目录", self.save_dir_edit.text())
@@ -443,25 +561,67 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, "提示", "请先选择有效的保存目录。")
 
-    def _select_all_papers(self) -> None:
-        for cb in self.paper_checkboxes:
-            cb.setChecked(True)
+    def _on_open_file(self) -> None:
+        """打开当前选择的报纸 PDF 文件"""
+        newspapers = self._get_selected_newspapers()
+        if not newspapers:
+            QMessageBox.warning(self, "提示", "请先选择要打开的报纸。")
+            return
+        save_dir = self.save_dir_edit.text().strip()
+        if not save_dir:
+            QMessageBox.warning(self, "提示", "请先选择保存目录。")
+            return
+        nid = newspapers[0]
+        info = next((s for s in NEWSPAPER_SOURCES if s["id"] == nid), None)
+        if not info:
+            return
+        name = info["name"]
+        date_str = self.date_edit.date().toString("yyyy-MM-dd")
+        file_path = Path(save_dir) / f"{name}_{date_str}.pdf"
+        if file_path.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
+        else:
+            QMessageBox.information(
+                self, "提示",
+                f"该日期的报纸尚未下载。\n请先下载「{name}」{date_str} 的报纸。",
+            )
 
-    def _deselect_all_papers(self) -> None:
-        for cb in self.paper_checkboxes:
-            cb.setChecked(False)
+    def _show_about(self) -> None:
+        """显示关于对话框"""
+        QMessageBox.about(
+            self,
+            "关于 报纸下载器",
+            "<h3>报纸下载器 v2.0.0</h3>"
+            "<p>支持下载人民日报、省市日报等多种报纸的 PDF 电子版，"
+            "合并为单文件便于阅读与存档。</p>"
+            "<p><b>功能特点：</b></p>"
+            "<ul>"
+            "<li>综合报纸：人民日报、新华每日电讯、光明日报、经济日报等</li>"
+            "<li>省市日报：覆盖全国各省市机关报，支持 30+ 份报纸</li>"
+            "<li>按日期选择下载，自动合并多版面为 PDF</li>"
+            "<li>支持求是网·党报党刊在线阅读入口</li>"
+            "</ul>"
+            "<p style='color:#8c8c8c; font-size:11px;'>"
+            "请合理使用，尊重版权。部分报纸源可能因网站改版暂时不可用。</p>"
+            "<p style='color:#8c8c8c; font-size:11px; margin-top:12px;'>by: xingxing · 52pojie</p>",
+        )
+
+    def _clear_paper_selection(self) -> None:
+        self.paper_button_group.setExclusive(False)
+        for rb in self.paper_radios:
+            rb.setChecked(False)
+        self.paper_button_group.setExclusive(True)
 
     def _get_selected_newspapers(self) -> list[str]:
-        return [
-            cb.property("newspaper_id")
-            for cb in self.paper_checkboxes
-            if cb.isChecked()
-        ]
+        rb = self.paper_button_group.checkedButton()
+        if rb and rb.property("newspaper_id"):
+            return [rb.property("newspaper_id")]
+        return []
 
     def _on_start_download(self) -> None:
         newspapers = self._get_selected_newspapers()
         if not newspapers:
-            QMessageBox.warning(self, "提示", "请至少选择一份报纸。")
+            QMessageBox.warning(self, "提示", "请选择要下载的报纸。")
             return
         save_dir = self.save_dir_edit.text().strip()
         if not save_dir:
