@@ -4,8 +4,8 @@
 
 block_cipher = None
 
-# 数据文件（若有自定义配置文件可在此添加）
-datas = []
+# 数据文件（图标等）
+datas = [("image/news.ico", "image")]
 
 a = Analysis(
     ['main.py'],
@@ -41,6 +41,7 @@ exe = EXE(
     a.datas,
     [],
     name='报纸下载器',
+    icon='image/news.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -19,9 +19,15 @@ if app_dir not in sys.path:
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 
 from ui.main_window import MainWindow, get_stylesheet
+
+
+def _icon_path() -> str:
+    """获取图标路径，兼容开发环境与 PyInstaller 打包"""
+    base = getattr(sys, "_MEIPASS", app_dir)
+    return os.path.join(base, "image", "news.ico")
 
 
 def main() -> None:
@@ -48,7 +54,15 @@ def main() -> None:
     # 应用全局样式（含 QMessageBox 等对话框）
     app.setStyleSheet(get_stylesheet())
 
+    # 设置应用与窗口图标
+    icon_path = _icon_path()
+    icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
+
     window = MainWindow()
+    if not icon.isNull():
+        window.setWindowIcon(icon)
     window.show()
     sys.exit(app.exec())
 
