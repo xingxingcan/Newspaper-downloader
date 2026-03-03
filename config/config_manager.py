@@ -13,7 +13,7 @@ class ConfigManager:
     """配置管理类，使用 JSON 文件存储用户偏好"""
 
     CONFIG_FILENAME = "newspaper_downloader_config.json"
-    DEFAULT_SAVE_DIR = str(Path.home() / "Documents" / "Newspapers")
+    DEFAULT_SAVE_DIR = str(Path.home() / "Desktop")
 
     def __init__(self):
         self._config_path = self._get_config_path()

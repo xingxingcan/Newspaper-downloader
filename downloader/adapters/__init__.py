@@ -6,15 +6,16 @@
 
 from config.newspaper_sources import NEWSPAPER_SOURCES
 from .people_daily import PeopleDailyAdapter
+from .economic_daily import EconomicDailyAdapter
 from .stub import StubAdapter
 
 # 适配器类映射
 ADAPTER_MAP = {
     "PeopleDailyAdapter": PeopleDailyAdapter,
+    "EconomicDailyAdapter": EconomicDailyAdapter,
     "XinhuaAdapter": StubAdapter,
     "GlobalTimesAdapter": StubAdapter,
     "GuangmingAdapter": StubAdapter,
-    "EconomicDailyAdapter": StubAdapter,
 }
 
 

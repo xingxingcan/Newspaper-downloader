@@ -9,20 +9,23 @@ import os
 import re
 import shutil
 import tempfile
+import warnings
 from pathlib import Path
 
 import requests
 import PyPDF2
 
+# 抑制 PyPDF2 对部分 PDF 的字典重复键警告
+warnings.filterwarnings("ignore", message="Multiple definitions in dictionary")
+
 from downloader.base import BaseAdapter, DownloadTask, DownloadResult, DownloadStatus
+from downloader.http_client import get_browser_headers, random_delay, create_session
 
 
 class PeopleDailyAdapter(BaseAdapter):
     """人民日报电子版下载器"""
 
-    HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    BASE_URL = "http://paper.people.com.cn/rmrb/pc"
 
     def download(
         self,
@@ -31,8 +34,19 @@ class PeopleDailyAdapter(BaseAdapter):
         is_cancelled=None,
     ) -> DownloadResult:
         date_str = task.date_str
+        # 解析日期：2026-03-03 -> YYYYMM=202603, DD=03
+        parts = date_str.split("-")
+        if len(parts) != 3:
+            return DownloadResult(
+                success=False,
+                message="日期格式无效，应为 YYYY-MM-DD",
+                status=DownloadStatus.FAILED,
+            )
+        yyyymm = parts[0] + parts[1]
+        dd = parts[2]
         today1 = date_str.replace("-", "/")
         today2 = date_str.replace("-", "")
+
         save_dir = task.save_dir
         part_path = tempfile.mkdtemp(prefix="rmrb_")
         try:
@@ -46,20 +60,24 @@ class PeopleDailyAdapter(BaseAdapter):
                     status=DownloadStatus.COMPLETED,
                 )
 
-            # 尝试新格式 (2024.12 后)
-            cover_url_new = f"http://paper.people.com.cn/rmrb/pc/layout/{today2}/node_01.html"
-            resp = requests.get(cover_url_new, headers=self.HEADERS, timeout=15)
-            if resp.status_code == 200 and "pageLink" in resp.text:
-                page_count = len(re.findall("pageLink", resp.text))
+            session = create_session(f"{self.BASE_URL}/")
+            random_delay(0.2, 0.6)  # 模拟用户进入页面后的短暂停顿
+            # 新格式：layout/YYYYMM/DD/node_XX.html
+            cover_url_new = f"{self.BASE_URL}/layout/{yyyymm}/{dd}/node_01.html"
+            resp = session.get(cover_url_new, headers=get_browser_headers(self.BASE_URL + "/", include_ua=False), timeout=20)
+            if resp.status_code == 200:
+                page_count = self._parse_page_count(resp.text, yyyymm, dd)
                 if page_count > 0:
                     return self._download_new_format(
-                        today2, part_path, str(output_file),
+                        session, yyyymm, dd, part_path, str(output_file),
                         page_count, progress_callback, is_cancelled
                     )
 
-            # 旧格式
+            # 旧格式（兼容历史日期）
+            session = create_session("http://paper.people.com.cn/")
+            random_delay(0.2, 0.6)
             cover_url_old = f"http://paper.people.com.cn/rmrb/html/{today1}/nbs.D110000renmrb_01.htm"
-            resp = requests.get(cover_url_old, headers=self.HEADERS, timeout=15)
+            resp = session.get(cover_url_old, headers=get_browser_headers("http://paper.people.com.cn/", include_ua=False), timeout=20)
             if resp.status_code == 403:
                 return DownloadResult(
                     success=False,
@@ -75,7 +93,7 @@ class PeopleDailyAdapter(BaseAdapter):
                 )
 
             return self._download_old_format(
-                today1, today2, part_path, str(output_file),
+                session, today1, today2, part_path, str(output_file),
                 page_count, progress_callback, is_cancelled
             )
         finally:
@@ -85,16 +103,26 @@ class PeopleDailyAdapter(BaseAdapter):
                 except OSError:
                     pass
 
+    def _parse_page_count(self, html: str, yyyymm: str, dd: str) -> int:
+        """从 layout 页面解析版面数量（node_01, node_02, ...）"""
+        matches = re.findall(r"node_(\d+)", html)
+        if matches:
+            return max(int(m) for m in matches)
+        return 0
+
     def _download_new_format(
         self,
-        today2: str,
+        session: requests.Session,
+        yyyymm: str,
+        dd: str,
         part_path: str,
         output_file: str,
         page_count: int,
         progress_callback,
         is_cancelled,
     ) -> DownloadResult:
-        """新格式：从 layout 页面解析 PDF 链接"""
+        """新格式：从 layout/YYYYMM/DD/node_XX.html 爬取每页 PDF 并合并"""
+        layout_base = f"{self.BASE_URL}/layout/{yyyymm}/{dd}/"
         for page in range(1, page_count + 1):
             if is_cancelled and is_cancelled():
                 return DownloadResult(
@@ -104,22 +132,54 @@ class PeopleDailyAdapter(BaseAdapter):
                 )
             if progress_callback:
                 progress_callback(page - 1, page_count, f"正在下载第 {page}/{page_count} 页")
+            if page > 1:
+                random_delay(0.4, 1.2)
 
-            page_url = f"http://paper.people.com.cn/rmrb/pc/layout/{today2}/node_{page:02d}.html"
-            resp = requests.get(page_url, headers=self.HEADERS, timeout=15)
-            matches = re.findall(r"attachement.*?\.pdf", resp.text)
-            if not matches:
+            page_url = f"{layout_base}node_{page:02d}.html"
+            resp = None
+            for retry in range(3):
+                try:
+                    resp = session.get(
+                        page_url,
+                        headers=get_browser_headers(layout_base, include_ua=False),
+                        timeout=20,
+                    )
+                    if resp and resp.status_code == 200:
+                        break
+                except (requests.RequestException, TimeoutError):
+                    resp = None
+            if not resp:
                 continue
-            download_url = "http://paper.people.com.cn/rmrb/pc/" + matches[0]
-            r = requests.get(download_url, headers=self.HEADERS, timeout=30)
-            if len(r.content) > 1000:
-                filename = f"rmrb{today2}{page:02d}.pdf"
-                with open(os.path.join(part_path, filename), "wb") as f:
-                    f.write(r.content)
+            matches = re.findall(r"(?:https?://[^\"]*)?(attachement/[^\s\"'<>]+\.pdf)", resp.text)
+            if not matches:
+                matches = re.findall(r"attachement[^\s\"']*?\.pdf", resp.text)
+            if matches:
+                pdf_path = matches[0].strip()
+                if pdf_path.startswith("http"):
+                    download_url = pdf_path
+                else:
+                    download_url = self.BASE_URL + "/" + pdf_path
+                random_delay(0.2, 0.6)
+                r = None
+                for retry in range(3):
+                    try:
+                        r = session.get(
+                            download_url,
+                            headers=get_browser_headers(page_url, include_ua=False),
+                            timeout=35,
+                        )
+                        if r and len(r.content) > 1000:
+                            break
+                    except (requests.RequestException, TimeoutError):
+                        r = None
+                if r and len(r.content) > 1000:
+                    filename = f"rmrb{yyyymm}{dd}{page:02d}.pdf"
+                    with open(os.path.join(part_path, filename), "wb") as f:
+                        f.write(r.content)
 
         if progress_callback:
             progress_callback(page_count, page_count, "正在合并 PDF...")
-        self._merge_pdfs(part_path, output_file, today2)
+        self._merge_pdfs(part_path, output_file, f"{yyyymm}{dd}")
         return DownloadResult(
             success=True,
             file_path=output_file,
@@ -129,6 +189,7 @@ class PeopleDailyAdapter(BaseAdapter):
 
     def _download_old_format(
         self,
+        session: requests.Session,
         today1: str,
         today2: str,
         part_path: str,
@@ -138,6 +199,7 @@ class PeopleDailyAdapter(BaseAdapter):
         is_cancelled,
     ) -> DownloadResult:
         """旧格式：直接拼接 URL 下载"""
+        ref = f"http://paper.people.com.cn/rmrb/html/{today1}/"
         for page in range(1, page_count + 1):
             if is_cancelled and is_cancelled():
                 return DownloadResult(
@@ -147,16 +209,22 @@ class PeopleDailyAdapter(BaseAdapter):
                 )
             if progress_callback:
                 progress_callback(page - 1, page_count, f"正在下载第 {page}/{page_count} 页")
+            if page > 1:
+                random_delay(0.4, 1.2)
 
             format_page = f"{page:02d}"
             down_url = f"http://paper.people.com.cn/rmrb/images/{today1}/{format_page}/rmrb{today2}{format_page}.pdf"
             for retry in range(5):
-                r = requests.get(down_url, headers=self.HEADERS, timeout=30)
-                if len(r.content) > 1000:
-                    filename = f"rmrb{today2}{format_page}.pdf"
-                    with open(os.path.join(part_path, filename), "wb") as f:
-                        f.write(r.content)
-                    break
+                try:
+                    r = session.get(down_url, headers=get_browser_headers(ref, include_ua=False), timeout=30)
+                    if r and len(r.content) > 1000:
+                        filename = f"rmrb{today2}{format_page}.pdf"
+                        with open(os.path.join(part_path, filename), "wb") as f:
+                            f.write(r.content)
+                        break
+                except (requests.RequestException, TimeoutError):
+                    if retry == 4:
+                        break
 
         if progress_callback:
             progress_callback(page_count, page_count, "正在合并 PDF...")

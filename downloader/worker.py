@@ -60,11 +60,18 @@ class DownloadWorker(QObject):
                 date_str=self.date_str,
                 save_dir=self.save_dir,
             )
-            result = adapter.download(
-                task,
-                progress_callback=progress_cb,
-                is_cancelled=is_cancelled,
-            )
+            try:
+                result = adapter.download(
+                    task,
+                    progress_callback=progress_cb,
+                    is_cancelled=is_cancelled,
+                )
+            except Exception as e:
+                result = DownloadResult(
+                    success=False,
+                    message=f"下载异常：{str(e)[:100]}",
+                    status=DownloadStatus.FAILED,
+                )
             self.task_done.emit(nid, result)
 
         self.all_done.emit()

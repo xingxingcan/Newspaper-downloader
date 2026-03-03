@@ -6,6 +6,11 @@
 
 import sys
 import os
+import logging
+
+# 屏蔽 PyPDF2 合并时的 "Multiple definitions in dictionary" 日志（人民日报 PDF 含非标准结构）
+for name in ("PyPDF2", "pypdf"):
+    logging.getLogger(name).setLevel(logging.ERROR)
 
 # 确保项目根目录在 Python 路径中，便于打包和开发环境运行
 app_dir = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +34,7 @@ def main() -> None:
     except AttributeError:
         pass
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     app.setApplicationName("报纸下载器")
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("NewspaperDownloader")
