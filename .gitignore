@@ -24,3 +24,4 @@ venv/
 # 本地配置/测试
 *.local
 test_out/
+.cursorrules
